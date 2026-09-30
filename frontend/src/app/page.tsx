@@ -172,32 +172,41 @@ export default function Home() {
       setIsUploading(false);
       setIsGenerating(true);
       setStage('processing');
+      setProcessingProgress({
+        session_id: session.id,
+        stage: 'pdf_extraction',
+        progress: 0.15,
+        message: 'Extracting text and structure from research PDFs...',
+      });
 
       // 3. Trigger generation
       await generateReview(session.id);
 
-      // 4. Connect WebSocket for progress
+      // Start live polling immediately
+      startPolling(session.id);
+
+      // 4. Connect WebSocket for progress if available
       try {
         const ws = connectProgressWS(
           session.id,
           (data) => {
             setProcessingProgress(data);
             if (data.stage === 'completed') {
+              if (pollRef.current) clearInterval(pollRef.current);
               fetchReview(session.id);
             } else if (data.stage === 'error') {
+              if (pollRef.current) clearInterval(pollRef.current);
               setError(data.message);
               setIsGenerating(false);
             }
           },
           () => {
-            // WebSocket error - fall back to polling
-            startPolling(session.id);
+            // WebSocket fallback handled by startPolling
           }
         );
         wsRef.current = ws;
       } catch {
-        // WebSocket not available - use polling
-        startPolling(session.id);
+        // Handled by polling
       }
 
     } catch (err: any) {
@@ -208,36 +217,48 @@ export default function Home() {
   };
 
   const startPolling = (sid: string) => {
+    if (pollRef.current) clearInterval(pollRef.current);
     pollRef.current = setInterval(async () => {
       try {
         const status = await getSessionStatus(sid);
         if (status.status === 'completed') {
-          clearInterval(pollRef.current!);
-          fetchReview(sid);
+          if (pollRef.current) clearInterval(pollRef.current);
+          setProcessingProgress({
+            session_id: sid,
+            stage: 'completed',
+            progress: 1.0,
+            message: 'Literature review generation complete!',
+          });
+          setTimeout(() => fetchReview(sid), 800);
         } else if (status.status === 'failed') {
-          clearInterval(pollRef.current!);
+          if (pollRef.current) clearInterval(pollRef.current);
           setError('Processing failed. Please try again.');
           setIsGenerating(false);
         } else {
           setPapers(status.papers);
           if (status.jobs && status.jobs.length > 0) {
+            const stages = Object.keys(STAGE_INFO).filter(k => k !== 'error' && k !== 'completed');
             const runningJob = status.jobs.find(j => j.status === 'running');
+            const completedJobs = status.jobs.filter(j => j.status === 'completed');
             const latestJob = runningJob || status.jobs[status.jobs.length - 1];
-            if (latestJob) {
-              setProcessingProgress({
-                session_id: sid,
-                stage: latestJob.job_type,
-                progress: latestJob.progress || 0.5,
-                message: `Analyzing: ${latestJob.job_type.replace(/_/g, ' ')}...`,
-              });
-            }
+
+            const currentIdx = stages.indexOf(latestJob.job_type);
+            const calculatedProgress = Math.max(0.15, Math.min(0.95, (completedJobs.length + 0.6) / stages.length));
+
+            setProcessingProgress({
+              session_id: sid,
+              stage: latestJob.job_type,
+              progress: latestJob.progress > 0 ? latestJob.progress : calculatedProgress,
+              message: STAGE_INFO[latestJob.job_type]?.label || `Processing: ${latestJob.job_type.replace(/_/g, ' ')}...`,
+            });
           }
         }
       } catch {
-        // Ignore polling errors
+        // Ignore polling network glitches
       }
-    }, 3000);
+    }, 2000);
   };
+
 
   const fetchReview = async (sid: string) => {
     try {
@@ -493,16 +514,24 @@ export default function Home() {
               })}
 
               {/* Overall progress bar */}
-              {processingProgress && (
-                <div className="pt-2">
-                  <div className="progress-bar">
-                    <div
-                      className="progress-bar-fill"
-                      style={{ width: `${Math.round(processingProgress.progress * 100)}%` }}
-                    />
-                  </div>
+              <div className="pt-4 mt-2 border-t border-surface-800/60 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-medium text-brand-300 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-brand-400 animate-ping inline-block"></span>
+                    {processingProgress?.message || 'Analyzing papers through evidence pipeline...'}
+                  </span>
+                  <span className="font-mono text-brand-400 font-bold text-sm">
+                    {Math.round((processingProgress?.progress || 0.15) * 100)}%
+                  </span>
                 </div>
-              )}
+                <div className="w-full bg-surface-800/90 h-3 rounded-full overflow-hidden border border-surface-700/50 p-0.5 shadow-inner">
+                  <div
+                    className="h-full bg-gradient-to-r from-brand-500 via-purple-500 to-indigo-500 transition-all duration-700 rounded-full shadow-lg shadow-brand-500/30"
+                    style={{ width: `${Math.max(8, Math.round((processingProgress?.progress || 0.15) * 100))}%` }}
+                  />
+                </div>
+              </div>
+
             </div>
 
             {error && (
