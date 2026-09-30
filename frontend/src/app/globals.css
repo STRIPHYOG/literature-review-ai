@@ -1,0 +1,200 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-surface-950 text-surface-100 font-sans antialiased;
+    min-height: 100vh;
+  }
+
+  ::selection {
+    @apply bg-brand-500/30 text-white;
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-surface-900/50;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-surface-600 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-surface-500;
+  }
+}
+
+@layer components {
+  /* Glassmorphism card */
+  .glass-card {
+    @apply bg-surface-900/60 backdrop-blur-xl border border-surface-700/50 rounded-2xl;
+    box-shadow: 
+      0 0 0 1px rgba(255, 255, 255, 0.05),
+      0 4px 6px -1px rgba(0, 0, 0, 0.3),
+      0 2px 4px -2px rgba(0, 0, 0, 0.2);
+  }
+
+  .glass-card-hover {
+    @apply glass-card transition-all duration-300;
+  }
+
+  .glass-card-hover:hover {
+    @apply border-brand-500/30 shadow-brand-500/10;
+    box-shadow: 
+      0 0 0 1px rgba(59, 130, 246, 0.2),
+      0 8px 25px -5px rgba(59, 130, 246, 0.15),
+      0 4px 10px -6px rgba(0, 0, 0, 0.3);
+  }
+
+  /* Gradient text */
+  .gradient-text {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, #60a5fa 0%, #a78bfa 50%, #f472b6 100%);
+  }
+
+  /* Primary button */
+  .btn-primary {
+    @apply relative inline-flex items-center justify-center px-6 py-3 
+           font-semibold text-white rounded-xl overflow-hidden
+           transition-all duration-300 ease-out;
+    background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+  }
+
+  .btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 30px -5px rgba(37, 99, 235, 0.4);
+  }
+
+  .btn-primary:active {
+    transform: translateY(0);
+  }
+
+  .btn-primary:disabled {
+    @apply opacity-50 cursor-not-allowed;
+    transform: none;
+    box-shadow: none;
+  }
+
+  /* Secondary button */
+  .btn-secondary {
+    @apply inline-flex items-center justify-center px-5 py-2.5
+           font-medium text-surface-200 rounded-xl
+           border border-surface-600/50 bg-surface-800/50
+           hover:bg-surface-700/50 hover:border-surface-500/50
+           transition-all duration-200;
+  }
+
+  /* Upload zone */
+  .upload-zone {
+    @apply relative flex flex-col items-center justify-center
+           border-2 border-dashed border-surface-600/50 rounded-2xl
+           p-10 cursor-pointer transition-all duration-300
+           bg-surface-900/30 hover:bg-surface-800/40;
+  }
+
+  .upload-zone.active {
+    @apply border-brand-400/70 bg-brand-500/5;
+    box-shadow: 0 0 40px rgba(59, 130, 246, 0.1) inset;
+  }
+
+  /* Progress bar */
+  .progress-bar {
+    @apply h-2 bg-surface-700 rounded-full overflow-hidden;
+  }
+
+  .progress-bar-fill {
+    @apply h-full rounded-full transition-all duration-500 ease-out;
+    background: linear-gradient(90deg, #2563eb, #7c3aed, #2563eb);
+    background-size: 200% 100%;
+    animation: shimmer 2s linear infinite;
+  }
+
+  /* Status badge */
+  .badge {
+    @apply inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium;
+  }
+
+  .badge-success {
+    @apply badge bg-emerald-500/15 text-emerald-400 border border-emerald-500/20;
+  }
+
+  .badge-warning {
+    @apply badge bg-amber-500/15 text-amber-400 border border-amber-500/20;
+  }
+
+  .badge-info {
+    @apply badge bg-brand-500/15 text-brand-400 border border-brand-500/20;
+  }
+
+  .badge-error {
+    @apply badge bg-red-500/15 text-red-400 border border-red-500/20;
+  }
+
+  /* Markdown review styling */
+  .review-content h1 {
+    @apply text-2xl font-bold text-white mt-8 mb-4 font-display;
+  }
+
+  .review-content h2 {
+    @apply text-xl font-semibold text-brand-300 mt-6 mb-3 font-display 
+           pb-2 border-b border-surface-700/50;
+  }
+
+  .review-content h3 {
+    @apply text-lg font-medium text-surface-200 mt-4 mb-2;
+  }
+
+  .review-content p {
+    @apply text-surface-300 leading-relaxed mb-4;
+  }
+
+  .review-content ul,
+  .review-content ol {
+    @apply ml-6 mb-4 space-y-1.5 text-surface-300;
+  }
+
+  .review-content li {
+    @apply leading-relaxed;
+  }
+
+  .review-content strong {
+    @apply text-surface-100 font-semibold;
+  }
+
+  .review-content blockquote {
+    @apply border-l-4 border-brand-500/50 pl-4 py-1 my-4 italic text-surface-400;
+  }
+
+  /* Citation link */
+  .citation-link {
+    @apply text-brand-400 hover:text-brand-300 cursor-pointer 
+           font-semibold underline underline-offset-2 
+           decoration-brand-500/30 hover:decoration-brand-400/60
+           transition-colors duration-200;
+  }
+}
+
+@layer utilities {
+  .animate-gradient-bg {
+    background-size: 300% 300%;
+    animation: gradient 8s ease infinite;
+  }
+}
