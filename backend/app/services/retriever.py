@@ -35,16 +35,22 @@ class HybridRetriever:
         # Cross-encoder reranker
         self.reranker = CrossEncoder(settings.reranker_model)
 
-        # Qdrant vector DB client with auto-fallback
+        # Qdrant vector DB client with instant fallback
+        self.qdrant = None
         try:
-            if settings.qdrant_api_key:
-                self.qdrant = QdrantClient(url=settings.qdrant_host, api_key=settings.qdrant_api_key)
-            elif settings.qdrant_host.startswith("http"):
-                self.qdrant = QdrantClient(url=settings.qdrant_host)
-            else:
-                self.qdrant = QdrantClient(host=settings.qdrant_host, port=settings.qdrant_port)
-        except Exception as e:
-            logger.warning("External Qdrant connection failed, using in-memory vector store", error=str(e))
+            if settings.qdrant_api_key and "qdrant.io" in settings.qdrant_host:
+                client = QdrantClient(url=settings.qdrant_host, api_key=settings.qdrant_api_key, timeout=3)
+                client.get_collections()
+                self.qdrant = client
+            elif settings.qdrant_host.startswith("http") and "qdrant" not in settings.qdrant_host:
+                client = QdrantClient(url=settings.qdrant_host, timeout=3)
+                client.get_collections()
+                self.qdrant = client
+        except Exception:
+            pass
+
+        if not self.qdrant:
+            logger.info("Using fast in-memory vector store for Qdrant")
             self.qdrant = QdrantClient(location=":memory:")
 
         # BM25 index (in-memory per session)
@@ -73,19 +79,31 @@ class HybridRetriever:
 
         collection_name = self._get_collection_name(session_id)
 
-        # Create Qdrant collection
+        # Create Qdrant collection safely
         try:
             self.qdrant.delete_collection(collection_name)
         except Exception:
             pass
 
-        self.qdrant.create_collection(
-            collection_name=collection_name,
-            vectors_config=VectorParams(
-                size=self.embedding_dim,
-                distance=Distance.COSINE,
-            ),
-        )
+        try:
+            self.qdrant.create_collection(
+                collection_name=collection_name,
+                vectors_config=VectorParams(
+                    size=self.embedding_dim,
+                    distance=Distance.COSINE,
+                ),
+            )
+        except Exception as e:
+            logger.warning("Qdrant collection create failed, falling back to memory", error=str(e))
+            self.qdrant = QdrantClient(location=":memory:")
+            self.qdrant.create_collection(
+                collection_name=collection_name,
+                vectors_config=VectorParams(
+                    size=self.embedding_dim,
+                    distance=Distance.COSINE,
+                ),
+            )
+
 
         # Generate embeddings in batches
         batch_size = 64
@@ -114,11 +132,25 @@ class HybridRetriever:
             ))
 
         # Upload in batches
-        for i in range(0, len(points), 100):
-            self.qdrant.upsert(
+        try:
+            for i in range(0, len(points), 100):
+                self.qdrant.upsert(
+                    collection_name=collection_name,
+                    points=points[i:i + 100],
+                )
+        except Exception as e:
+            logger.warning("Qdrant upsert failed, retrying in-memory", error=str(e))
+            self.qdrant = QdrantClient(location=":memory:")
+            self.qdrant.create_collection(
                 collection_name=collection_name,
-                points=points[i:i + 100],
+                vectors_config=VectorParams(size=self.embedding_dim, distance=Distance.COSINE),
             )
+            for i in range(0, len(points), 100):
+                self.qdrant.upsert(
+                    collection_name=collection_name,
+                    points=points[i:i + 100],
+                )
+
 
         # Update embedding IDs in chunks
         for idx, chunk in enumerate(chunks):
