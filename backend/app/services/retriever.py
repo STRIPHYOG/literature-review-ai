@@ -28,12 +28,23 @@ class HybridRetriever:
     """
 
     def __init__(self):
-        # Dense embedding model
-        self.embedding_model = SentenceTransformer(settings.embedding_model)
-        self.embedding_dim = self.embedding_model.get_sentence_embedding_dimension()
+        # Dense embedding model (with fail-safe loading)
+        self.embedding_model = None
+        self.embedding_dim = 384
+        try:
+            self.embedding_model = SentenceTransformer(settings.embedding_model)
+            self.embedding_dim = self.embedding_model.get_sentence_embedding_dimension()
+        except Exception as e:
+            logger.warning("Dense embedding model not loaded, using BM25 fallback", error=str(e))
+            self.embedding_model = None
 
-        # Cross-encoder reranker
-        self.reranker = CrossEncoder(settings.reranker_model)
+        # Cross-encoder reranker (optional fast reranking)
+        self.reranker = None
+        try:
+            self.reranker = CrossEncoder(settings.reranker_model)
+        except Exception:
+            self.reranker = None
+
 
         # Qdrant vector DB client with instant fallback
         self.qdrant = None
@@ -105,51 +116,57 @@ class HybridRetriever:
             )
 
 
-        # Generate embeddings in batches
-        batch_size = 64
+        # Generate embeddings in batches if model is loaded
         texts = [c.content for c in chunks]
         all_embeddings = []
+        if self.embedding_model:
+            try:
+                batch_size = 32
+                for i in range(0, len(texts), batch_size):
+                    batch = texts[i:i + batch_size]
+                    embeddings = self.embedding_model.encode(batch, show_progress_bar=False)
+                    all_embeddings.extend(embeddings)
+            except Exception as e:
+                logger.warning("Dense embedding generation skipped, using BM25", error=str(e))
+                all_embeddings = []
 
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i:i + batch_size]
-            embeddings = self.embedding_model.encode(batch, show_progress_bar=False)
-            all_embeddings.extend(embeddings)
+        # Store in Qdrant if embeddings were computed
+        if all_embeddings and len(all_embeddings) == len(chunks):
+            points = []
+            for idx, (chunk, embedding) in enumerate(zip(chunks, all_embeddings)):
+                points.append(PointStruct(
+                    id=idx,
+                    vector=embedding.tolist(),
+                    payload={
+                        "chunk_id": str(chunk.id),
+                        "paper_id": str(chunk.paper_id),
+                        "content": chunk.content,
+                        "section_name": chunk.section_name,
+                        "page_number": chunk.page_number,
+                        "chunk_index": chunk.chunk_index,
+                    },
+                ))
 
-        # Store in Qdrant
-        points = []
-        for idx, (chunk, embedding) in enumerate(zip(chunks, all_embeddings)):
-            points.append(PointStruct(
-                id=idx,
-                vector=embedding.tolist(),
-                payload={
-                    "chunk_id": str(chunk.id),
-                    "paper_id": str(chunk.paper_id),
-                    "content": chunk.content,
-                    "section_name": chunk.section_name,
-                    "page_number": chunk.page_number,
-                    "chunk_index": chunk.chunk_index,
-                },
-            ))
-
-        # Upload in batches
-        try:
-            for i in range(0, len(points), 100):
-                self.qdrant.upsert(
+            # Upload in batches
+            try:
+                for i in range(0, len(points), 100):
+                    self.qdrant.upsert(
+                        collection_name=collection_name,
+                        points=points[i:i + 100],
+                    )
+            except Exception as e:
+                logger.warning("Qdrant upsert failed, retrying in-memory", error=str(e))
+                self.qdrant = QdrantClient(location=":memory:")
+                self.qdrant.create_collection(
                     collection_name=collection_name,
-                    points=points[i:i + 100],
+                    vectors_config=VectorParams(size=self.embedding_dim, distance=Distance.COSINE),
                 )
-        except Exception as e:
-            logger.warning("Qdrant upsert failed, retrying in-memory", error=str(e))
-            self.qdrant = QdrantClient(location=":memory:")
-            self.qdrant.create_collection(
-                collection_name=collection_name,
-                vectors_config=VectorParams(size=self.embedding_dim, distance=Distance.COSINE),
-            )
-            for i in range(0, len(points), 100):
-                self.qdrant.upsert(
-                    collection_name=collection_name,
-                    points=points[i:i + 100],
-                )
+                for i in range(0, len(points), 100):
+                    self.qdrant.upsert(
+                        collection_name=collection_name,
+                        points=points[i:i + 100],
+                    )
+
 
 
         # Update embedding IDs in chunks
@@ -189,26 +206,27 @@ class HybridRetriever:
         collection_name = self._get_collection_name(session_id)
 
         # ─── Dense Vector Search ───
-        query_embedding = self.embedding_model.encode(query).tolist()
+        dense_results = []
+        if self.embedding_model:
+            try:
+                query_embedding = self.embedding_model.encode(query).tolist()
+                search_filter = None
+                if exclude_paper_id:
+                    search_filter = Filter(
+                        must_not=[
+                            FieldCondition(key="paper_id", match=MatchValue(value=exclude_paper_id))
+                        ]
+                    )
+                dense_results = self.qdrant.search(
+                    collection_name=collection_name,
+                    query_vector=query_embedding,
+                    limit=top_k,
+                    query_filter=search_filter,
+                )
+            except Exception as e:
+                logger.warning("Dense search failed", error=str(e))
+                dense_results = []
 
-        search_filter = None
-        if exclude_paper_id:
-            search_filter = Filter(
-                must_not=[
-                    FieldCondition(key="paper_id", match=MatchValue(value=exclude_paper_id))
-                ]
-            )
-
-        try:
-            dense_results = self.qdrant.search(
-                collection_name=collection_name,
-                query_vector=query_embedding,
-                limit=top_k,
-                query_filter=search_filter,
-            )
-        except Exception as e:
-            logger.warning("Dense search failed", error=str(e))
-            dense_results = []
 
         # ─── BM25 Sparse Search ───
         bm25_results = []
