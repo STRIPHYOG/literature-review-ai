@@ -50,11 +50,12 @@ class Settings(BaseSettings):
     def sync_database_url(self) -> str:
         url = self.database_url
         if url.startswith("postgresql+asyncpg://"):
-            return url.replace("postgresql+asyncpg://", "postgresql+psycopg2://", 1)
+            url = url.replace("postgresql+asyncpg://", "postgresql+psycopg2://", 1)
         elif url.startswith("postgres://"):
-            return url.replace("postgres://", "postgresql+psycopg2://", 1)
+            url = url.replace("postgres://", "postgresql+psycopg2://", 1)
         elif url.startswith("postgresql://") and not url.startswith("postgresql+psycopg2://"):
-            return url.replace("postgresql://", "postgresql+psycopg2://", 1)
+            url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
+        url = url.replace("&channel_binding=require", "")
         return url
 
     # ─── Redis ───

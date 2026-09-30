@@ -28,12 +28,15 @@ settings = get_settings()
 sync_engine = create_engine(settings.sync_database_url, pool_pre_ping=True)
 SyncSession = sessionmaker(bind=sync_engine)
 
-# Redis client for publishing progress updates
-redis_client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
+# Redis client for publishing progress updates (graceful fallback)
+try:
+    redis_client = redis.Redis.from_url(settings.redis_url, decode_responses=True, socket_connect_timeout=2)
+except Exception:
+    redis_client = None
 
 
 def publish_progress(session_id: str, stage: str, progress: float, message: str, details: dict = None):
-    """Publish a progress update to the WebSocket channel via Redis pub/sub."""
+    """Publish a progress update to the WebSocket channel via Redis pub/sub if available."""
     data = {
         "session_id": session_id,
         "stage": stage,
@@ -42,8 +45,13 @@ def publish_progress(session_id: str, stage: str, progress: float, message: str,
         "details": details or {},
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
-    redis_client.publish(f"progress:{session_id}", json.dumps(data))
-    logger.info("Progress update", **data)
+    if redis_client:
+        try:
+            redis_client.publish(f"progress:{session_id}", json.dumps(data))
+        except Exception:
+            pass
+    logger.info("Progress update", stage=stage, progress=progress, message=message)
+
 
 
 def update_job_status(db: DBSession, session_id: str, job_type: str, status: str, progress: float = 0.0, error: str = None):

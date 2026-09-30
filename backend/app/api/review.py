@@ -3,7 +3,8 @@ Review generation and evidence inspection API endpoints.
 """
 
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status
+import uuid
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -21,7 +22,11 @@ router = APIRouter(prefix="/api/sessions", tags=["review"])
 
 
 @router.post("/{session_id}/generate", status_code=status.HTTP_202_ACCEPTED)
-async def generate_review(session_id: UUID, db: AsyncSession = Depends(get_db)):
+async def generate_review(
+    session_id: UUID,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db)
+):
     """
     Trigger literature review generation for a session.
     This kicks off the full async pipeline:
@@ -54,18 +59,26 @@ async def generate_review(session_id: UUID, db: AsyncSession = Depends(get_db)):
     session.status = "processing"
     await db.flush()
 
-    # Trigger async processing pipeline via Celery
-    from app.workers.tasks import process_session_pipeline
-    task = process_session_pipeline.delay(str(session_id))
-
-    logger.info("Review generation triggered", session_id=str(session_id), task_id=task.id)
+    task_id = str(uuid.uuid4())
+    # Try Celery first; fall back to FastAPI BackgroundTasks if Redis is unavailable
+    try:
+        from app.workers.tasks import process_session_pipeline
+        task = process_session_pipeline.delay(str(session_id))
+        task_id = task.id
+        logger.info("Review generation queued in Celery", session_id=str(session_id), task_id=task_id)
+    except Exception as e:
+        logger.warning("Celery/Redis not available, running via FastAPI BackgroundTasks", error=str(e))
+        from app.workers.tasks import process_session_pipeline
+        background_tasks.add_task(process_session_pipeline, str(session_id))
+        logger.info("Review generation running in background", session_id=str(session_id), task_id=task_id)
 
     return {
         "session_id": str(session_id),
         "status": "processing",
-        "task_id": task.id,
-        "message": "Literature review generation started. Use the status endpoint or WebSocket to track progress.",
+        "task_id": task_id,
+        "message": "Literature review generation started.",
     }
+
 
 
 @router.get("/{session_id}/review", response_model=ReviewResponse)
