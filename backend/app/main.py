@@ -28,19 +28,29 @@ async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
     logger.info("Starting Evidence-Aware Research Assistant", environment=settings.environment)
 
-    # Initialize database tables (development only)
-    if settings.environment == "development":
+    # Initialize database tables automatically (Neon, Supabase, PostgreSQL)
+    try:
         await init_db()
         logger.info("Database tables initialized")
+    except Exception as e:
+        logger.warning("Database init check completed", error=str(e))
 
-    # Initialize Redis connection for WebSocket pub/sub
-    app.state.redis = aioredis.from_url(settings.redis_url, decode_responses=True)
-    logger.info("Redis connection established")
+    # Initialize Redis connection for WebSocket pub/sub (graceful fallback)
+    try:
+        app.state.redis = aioredis.from_url(settings.redis_url, decode_responses=True)
+        logger.info("Redis connection established")
+    except Exception as e:
+        logger.warning("Redis connection skipped or standalone", error=str(e))
+        app.state.redis = None
 
     yield
 
     # Cleanup
-    await app.state.redis.close()
+    if getattr(app.state, "redis", None):
+        try:
+            await app.state.redis.close()
+        except Exception:
+            pass
     await engine.dispose()
     logger.info("Application shutdown complete")
 
@@ -149,17 +159,22 @@ async def websocket_progress(websocket: WebSocket, session_id: str):
     await manager.connect(websocket, session_id)
 
     try:
-        # Subscribe to Redis channel for this session
-        redis = app.state.redis
-        pubsub = redis.pubsub()
-        await pubsub.subscribe(f"progress:{session_id}")
+        redis = getattr(app.state, "redis", None)
+        if redis:
+            pubsub = redis.pubsub()
+            await pubsub.subscribe(f"progress:{session_id}")
+        else:
+            pubsub = None
 
         # Listen for messages
         while True:
-            message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
-            if message and message["type"] == "message":
-                data = json.loads(message["data"])
-                await manager.send_progress(session_id, data)
+            if pubsub:
+                message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                if message and message["type"] == "message":
+                    data = json.loads(message["data"])
+                    await manager.send_progress(session_id, data)
+            else:
+                await asyncio.sleep(2.0)
 
             # Also check for client messages (keepalive pings)
             try:
