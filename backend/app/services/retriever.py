@@ -35,8 +35,17 @@ class HybridRetriever:
         # Cross-encoder reranker
         self.reranker = CrossEncoder(settings.reranker_model)
 
-        # Qdrant vector DB client
-        self.qdrant = QdrantClient(host=settings.qdrant_host, port=settings.qdrant_port)
+        # Qdrant vector DB client with auto-fallback
+        try:
+            if settings.qdrant_api_key:
+                self.qdrant = QdrantClient(url=settings.qdrant_host, api_key=settings.qdrant_api_key)
+            elif settings.qdrant_host.startswith("http"):
+                self.qdrant = QdrantClient(url=settings.qdrant_host)
+            else:
+                self.qdrant = QdrantClient(host=settings.qdrant_host, port=settings.qdrant_port)
+        except Exception as e:
+            logger.warning("External Qdrant connection failed, using in-memory vector store", error=str(e))
+            self.qdrant = QdrantClient(location=":memory:")
 
         # BM25 index (in-memory per session)
         self._bm25_indices: Dict[str, dict] = {}

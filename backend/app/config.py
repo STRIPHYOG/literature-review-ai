@@ -68,6 +68,7 @@ class Settings(BaseSettings):
     qdrant_host: str = "qdrant"
     qdrant_port: int = 6333
     qdrant_collection: str = "paper_chunks"
+    qdrant_api_key: str = ""
 
     # ─── S3 / MinIO ───
     s3_endpoint_url: str = "http://minio:9000"
