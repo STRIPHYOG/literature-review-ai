@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     # ─── Backend ───
     backend_host: str = "0.0.0.0"
     backend_port: int = 8000
-    backend_cors_origins: str = "http://localhost:3000,http://localhost:3001"
+    backend_cors_origins: str = "*"
 
     @property
     def cors_origins(self) -> List[str]:
