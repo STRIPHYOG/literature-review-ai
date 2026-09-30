@@ -44,4 +44,6 @@ data/
 
 # Models cache
 .cache/
-models/
+/models/
+!backend/app/models/
+
