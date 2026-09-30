@@ -220,6 +220,18 @@ export default function Home() {
           setIsGenerating(false);
         } else {
           setPapers(status.papers);
+          if (status.jobs && status.jobs.length > 0) {
+            const runningJob = status.jobs.find(j => j.status === 'running');
+            const latestJob = runningJob || status.jobs[status.jobs.length - 1];
+            if (latestJob) {
+              setProcessingProgress({
+                session_id: sid,
+                stage: latestJob.job_type,
+                progress: latestJob.progress || 0.5,
+                message: `Analyzing: ${latestJob.job_type.replace(/_/g, ' ')}...`,
+              });
+            }
+          }
         }
       } catch {
         // Ignore polling errors
