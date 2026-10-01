@@ -149,35 +149,55 @@ export async function uploadPapers(
   files: File[],
   onProgress?: (progress: number) => void
 ): Promise<UploadResponse> {
-  const formData = new FormData();
-  files.forEach((file) => formData.append('files', file));
+  const uploadedFiles: string[] = [];
+  const totalFiles = files.length;
 
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', `${API_URL}/api/sessions/${sessionId}/papers`);
+  for (let i = 0; i < totalFiles; i++) {
+    const file = files[i];
+    const formData = new FormData();
+    formData.append('files', file);
 
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable && onProgress) {
-        onProgress(Math.round((e.loaded / e.total) * 100));
-      }
-    };
+    await new Promise<void>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${API_URL}/api/sessions/${sessionId}/papers`);
 
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(JSON.parse(xhr.responseText));
-      } else {
-        try {
-          const err = JSON.parse(xhr.responseText);
-          reject(new Error(err.detail || `Upload failed: ${xhr.status}`));
-        } catch {
-          reject(new Error(`Upload failed: ${xhr.status}`));
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && onProgress) {
+          const fileFraction = e.loaded / e.total;
+          const overallProgress = Math.round(((i + fileFraction) / totalFiles) * 100);
+          onProgress(overallProgress);
         }
-      }
-    };
+      };
 
-    xhr.onerror = () => reject(new Error('Upload failed: network error'));
-    xhr.send(formData);
-  });
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          uploadedFiles.push(file.name);
+          resolve();
+        } else {
+          try {
+            const err = JSON.parse(xhr.responseText);
+            reject(new Error(err.detail || `Upload failed for ${file.name} (status ${xhr.status})`));
+          } catch {
+            reject(new Error(`Upload failed for ${file.name} (status ${xhr.status})`));
+          }
+        }
+      };
+
+      xhr.onerror = () => reject(new Error(`Network error uploading "${file.name}". Please retry.`));
+      xhr.send(formData);
+    });
+
+    if (onProgress) {
+      onProgress(Math.round(((i + 1) / totalFiles) * 100));
+    }
+  }
+
+  return {
+    session_id: sessionId,
+    uploaded_files: uploadedFiles,
+    total_files: uploadedFiles.length,
+    message: `Successfully uploaded ${uploadedFiles.length} papers`,
+  };
 }
 
 export async function generateReview(sessionId: string): Promise<any> {
