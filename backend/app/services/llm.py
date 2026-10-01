@@ -133,6 +133,7 @@ class LLMClient:
         temperature: float = 0.2,
         max_tokens: int = 4000,
         json_mode: bool = False,
+        timeout: float = 300.0,
     ) -> str:
         """
         Generate completion text from the active LLM provider.
@@ -159,7 +160,7 @@ class LLMClient:
                 messages=messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
-                timeout=45.0,
+                timeout=timeout,
                 **extra_params,
             )
             return response.choices[0].message.content or ""
@@ -240,6 +241,7 @@ class LLMClient:
         system_prompt: Optional[str] = None,
         temperature: float = 0.1,
         max_tokens: int = 4000,
+        timeout: float = 300.0,
     ) -> Union[Dict[str, Any], List[Any]]:
         """
         Generate and parse JSON from the LLM, automatically stripping markdown code blocks.
@@ -250,6 +252,7 @@ class LLMClient:
             temperature=temperature,
             max_tokens=max_tokens,
             json_mode=True if self.provider in ("groq", "openrouter") else False,
+            timeout=timeout,
         )
 
         cleaned = raw_text.strip()

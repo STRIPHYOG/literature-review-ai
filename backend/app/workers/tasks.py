@@ -382,6 +382,13 @@ def process_session_pipeline(self, session_id: str):
             session = db.query(SessionModel).filter(SessionModel.id == session_id).first()
             if session:
                 session.status = "failed"
+            running_job = db.query(ProcessingJob).filter(
+                ProcessingJob.session_id == session_id,
+                ProcessingJob.status == "running",
+            ).first()
+            if running_job:
+                running_job.status = "failed"
+                running_job.error_message = str(e)
             db.commit()
         except Exception:
             db.rollback()
