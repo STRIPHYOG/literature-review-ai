@@ -119,22 +119,16 @@ def process_session_pipeline(self, session_id: str):
         update_job_status(db, session_id, "pdf_extraction", "running")
 
         from app.services.pdf_processor import PDFProcessor
-        from concurrent.futures import ThreadPoolExecutor
         pdf_processor = PDFProcessor()
 
-        def _extract_single_pdf(item):
-            pid, s3_k = item
-            return pid, pdf_processor.extract_from_s3(s3_k)
-
-        pdf_inputs = [(p.id, p.s3_key) for p in papers]
-        with ThreadPoolExecutor(max_workers=min(4, len(papers))) as executor:
-            pdf_results = list(executor.map(_extract_single_pdf, pdf_inputs))
-
-        pdf_map = dict(pdf_results)
         for i, paper in enumerate(papers):
-            extracted = pdf_map.get(paper.id, {"full_text": "", "page_count": 0})
-            paper.full_text = extracted["full_text"]
-            paper.page_count = extracted["page_count"]
+            publish_progress(session_id, "pdf_extraction",
+                            (i + 1) / (len(papers) * total_steps),
+                            f"Extracting {paper.filename} ({i+1}/{len(papers)})",
+                            {"current_paper": paper.filename, "paper_index": i + 1, "total_papers": len(papers)})
+            extracted = pdf_processor.extract_from_s3(paper.s3_key)
+            paper.full_text = extracted.get("full_text", "")
+            paper.page_count = extracted.get("page_count", 0)
             paper.processing_status = "extracted"
             db.commit()
             update_job_status(db, session_id, "pdf_extraction", "running", progress=round((i + 1) / len(papers), 2))

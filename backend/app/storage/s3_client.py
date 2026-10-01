@@ -99,6 +99,25 @@ class StorageClient:
 
         raise FileNotFoundError(f"File not found: {s3_key}")
 
+    def download_file_sync(self, s3_key: str) -> bytes:
+        """Synchronously download a file from storage."""
+        local_path = UPLOAD_DIR / s3_key
+        if local_path.exists():
+            return local_path.read_bytes()
+
+        if self.use_s3 and self.client:
+            try:
+                response = self.client.get_object(Bucket=self.bucket, Key=s3_key)
+                content = response["Body"].read()
+                local_path.parent.mkdir(parents=True, exist_ok=True)
+                local_path.write_bytes(content)
+                return content
+            except Exception as e:
+                logger.error("S3 download failed", key=s3_key, error=str(e))
+                raise
+
+        raise FileNotFoundError(f"File not found: {s3_key}")
+
     async def delete_file(self, s3_key: str):
         """Delete a file from storage."""
         local_path = UPLOAD_DIR / s3_key

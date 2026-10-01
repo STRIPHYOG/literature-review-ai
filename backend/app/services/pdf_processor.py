@@ -6,7 +6,6 @@ Handles scientific document structure with page-level extraction.
 import io
 import re
 import fitz  # PyMuPDF
-import pdfplumber
 import structlog
 from typing import Dict, List, Any, Optional
 
@@ -49,14 +48,8 @@ class PDFProcessor:
         )
 
     def extract_from_s3(self, s3_key: str) -> Dict[str, Any]:
-        """Download PDF from S3 and extract text."""
-        import asyncio
-        # Run the async S3 download synchronously for Celery
-        loop = asyncio.new_event_loop()
-        try:
-            pdf_bytes = loop.run_until_complete(s3_client.download_file(s3_key))
-        finally:
-            loop.close()
+        """Download PDF from storage and extract text with PyMuPDF."""
+        pdf_bytes = s3_client.download_file_sync(s3_key)
         return self.extract_from_bytes(pdf_bytes)
 
     def extract_from_bytes(self, pdf_bytes: bytes) -> Dict[str, Any]:
@@ -87,22 +80,6 @@ class PDFProcessor:
 
             result["pages"] = page_texts
             result["full_text"] = "\n\n".join(p["text"] for p in page_texts)
-
-            # Table extraction with pdfplumber (better at tables)
-            try:
-                with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-                    for page_num, page in enumerate(pdf.pages):
-                        tables = page.extract_tables()
-                        for table in tables:
-                            if table and len(table) > 1:
-                                result["tables"].append({
-                                    "page_number": page_num + 1,
-                                    "data": table,
-                                    "headers": table[0] if table else [],
-                                    "rows": table[1:] if len(table) > 1 else [],
-                                })
-            except Exception as e:
-                logger.warning("pdfplumber table extraction failed", error=str(e))
 
             # Section detection
             result["sections"] = self._detect_sections(result["full_text"])
