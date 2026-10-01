@@ -514,10 +514,8 @@ export default function Home() {
             : (files[currentFileIndex - 1]?.name || papers[currentFileIndex - 1]?.filename || `Paper ${currentFileIndex} of ${totalFiles}`);
 
           const overallPct = Math.round((processingProgress?.progress || 0.15) * 100);
-          const estTotalSeconds = elapsedSeconds > 3 && overallPct > 5 
-            ? Math.round(elapsedSeconds / (overallPct / 100))
-            : Math.max(35, totalFiles * 12);
-          const estimatedRemainingSeconds = Math.max(3, estTotalSeconds - elapsedSeconds);
+          const remainingFactor = Math.max(0.05, 1 - (overallPct / 100));
+          const estimatedRemainingSeconds = Math.max(5, Math.min(120, Math.round(totalFiles * 15 * remainingFactor)));
 
           return (
             <div className="animate-fade-in max-w-2xl mx-auto py-12 space-y-6">

@@ -145,13 +145,22 @@ def process_session_pipeline(self, session_id: str):
         from concurrent.futures import ThreadPoolExecutor
         metadata_extractor = MetadataExtractor()
 
-        def _extract_paper_meta(p):
-            return p, metadata_extractor.extract(p.full_text, p.filename)
+        def _extract_paper_meta(item):
+            pid, text, fname = item
+            try:
+                meta = metadata_extractor.extract(text, fname)
+                return pid, meta
+            except Exception as e:
+                logger.warning("Metadata extraction failed", error=str(e), filename=fname)
+                return pid, metadata_extractor._extract_heuristic(text, fname)
 
+        paper_tuples = [(p.id, p.full_text or "", p.filename) for p in papers]
         with ThreadPoolExecutor(max_workers=min(4, len(papers))) as executor:
-            meta_results = list(executor.map(_extract_paper_meta, papers))
+            meta_results = list(executor.map(_extract_paper_meta, paper_tuples))
 
-        for i, (paper, metadata) in enumerate(meta_results):
+        meta_dict = dict(meta_results)
+        for i, paper in enumerate(papers):
+            metadata = meta_dict.get(paper.id) or metadata_extractor._extract_heuristic(paper.full_text, paper.filename)
             paper.title = metadata.get("title", paper.filename)
             paper.authors = metadata.get("authors", [])
             paper.publication_year = metadata.get("publication_year")
@@ -224,15 +233,37 @@ def process_session_pipeline(self, session_id: str):
         from app.services.claim_extractor import ClaimExtractor
         claim_extractor = ClaimExtractor()
 
-        def _extract_single_claims(p):
-            return p, claim_extractor.extract_claims(p)
+        class ClaimPaperData:
+            def __init__(self, title, abstract, methodology, key_results, limitations, full_text):
+                self.title = title
+                self.abstract = abstract
+                self.methodology = methodology
+                self.key_results = key_results
+                self.limitations = limitations
+                self.full_text = full_text
+
+        def _extract_single_claims(item):
+            pid, c_paper = item
+            try:
+                claims = claim_extractor.extract_claims(c_paper)
+                return pid, claims
+            except Exception as e:
+                logger.warning("Claim extraction failed", error=str(e))
+                return pid, claim_extractor._extract_heuristic(c_paper)
+
+        claim_items = [
+            (p.id, ClaimPaperData(p.title or p.filename, p.abstract, p.methodology, p.key_results, p.limitations, p.full_text or ""))
+            for p in papers
+        ]
 
         with ThreadPoolExecutor(max_workers=min(4, len(papers))) as executor:
-            claims_results = list(executor.map(_extract_single_claims, papers))
+            claims_results = list(executor.map(_extract_single_claims, claim_items))
 
+        claims_map = dict(claims_results)
         all_claims = []
-        for i, (paper, claims) in enumerate(claims_results):
-            for claim_data in claims:
+        for i, paper in enumerate(papers):
+            paper_claims = claims_map.get(paper.id) or []
+            for claim_data in paper_claims:
                 claim = Claim(
                     paper_id=paper.id,
                     claim_text=claim_data["claim_text"],
