@@ -84,11 +84,32 @@ export default function Home() {
   const [review, setReview] = useState<ReviewResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [papers, setPapers] = useState<PaperSummary[]>([]);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [stepProgress, setStepProgress] = useState<Record<string, number>>({});
   const [isDragActive, setIsDragActive] = useState(false);
   const [activeTab, setActiveTab] = useState<'review' | 'comparison' | 'gaps' | 'evidence'>('review');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (stage === 'processing') {
+      timer = setInterval(() => {
+        setElapsedSeconds((prev) => prev + 1);
+      }, 1000);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [stage]);
+
+  const formatTime = (secs: number) => {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${m}:${s < 10 ? '0' : ''}${s}`;
+  };
+
 
   // ─── File Handling ───
 
@@ -191,6 +212,12 @@ export default function Home() {
           session.id,
           (data) => {
             setProcessingProgress(data);
+            if (data.stage && data.progress !== undefined) {
+              setStepProgress((prev) => ({
+                ...prev,
+                [data.stage]: data.progress,
+              }));
+            }
             if (data.stage === 'completed') {
               if (pollRef.current) clearInterval(pollRef.current);
               fetchReview(session.id);
@@ -242,21 +269,27 @@ export default function Home() {
             const completedJobs = status.jobs.filter(j => j.status === 'completed');
             const latestJob = runningJob || status.jobs[status.jobs.length - 1];
 
-            const currentIdx = stages.indexOf(latestJob.job_type);
-            const calculatedProgress = Math.max(0.15, Math.min(0.95, (completedJobs.length + 0.6) / stages.length));
+            const jobProgressMap: Record<string, number> = {};
+            status.jobs.forEach(j => {
+              jobProgressMap[j.job_type] = j.status === 'completed' ? 1.0 : (j.progress !== null && j.progress !== undefined ? j.progress : 0.4);
+            });
+            setStepProgress(jobProgressMap);
+
+            const calculatedProgress = Math.max(0.15, Math.min(0.96, (completedJobs.length + (runningJob?.progress || 0.4)) / stages.length));
 
             setProcessingProgress({
               session_id: sid,
               stage: latestJob.job_type,
-              progress: latestJob.progress > 0 ? latestJob.progress : calculatedProgress,
+              progress: calculatedProgress,
               message: STAGE_INFO[latestJob.job_type]?.label || `Processing: ${latestJob.job_type.replace(/_/g, ' ')}...`,
             });
           }
+
         }
       } catch {
         // Ignore polling network glitches
       }
-    }, 2000);
+    }, 1500);
   };
 
 
@@ -462,85 +495,214 @@ export default function Home() {
         )}
 
         {/* ─── Processing Stage ─── */}
-        {stage === 'processing' && (
-          <div className="animate-fade-in max-w-2xl mx-auto py-16 space-y-8">
-            <div className="text-center space-y-3">
-              <h2 className="text-3xl font-bold font-display text-white">
-                Analyzing Your Papers
-              </h2>
-              <p className="text-surface-400">
-                Processing {files.length} paper{files.length > 1 ? 's' : ''} through the evidence-aware pipeline...
-              </p>
-            </div>
+        {stage === 'processing' && (() => {
+          const totalFiles = files.length > 0 ? files.length : (papers.length > 0 ? papers.length : 1);
+          const currentStageKey = processingProgress?.stage || 'pdf_extraction';
+          const stages = Object.keys(STAGE_INFO).filter(k => k !== 'error');
+          const currentIdx = stages.indexOf(currentStageKey);
+          
+          const rawStepProgress = stepProgress[currentStageKey];
+          const activeStepRatio = rawStepProgress !== undefined ? rawStepProgress : 0.35;
+          
+          const isSynthesisStage = ['review_generation', 'verification', 'completed'].includes(currentStageKey);
+          const currentFileIndex = isSynthesisStage 
+            ? totalFiles 
+            : Math.min(totalFiles, Math.max(1, Math.ceil(activeStepRatio * totalFiles)));
+          const remainingFilesCount = Math.max(0, totalFiles - currentFileIndex);
+          const currentFileName = isSynthesisStage
+            ? `All ${totalFiles} papers processed · Synthesizing literature review`
+            : (files[currentFileIndex - 1]?.name || papers[currentFileIndex - 1]?.filename || `Paper ${currentFileIndex} of ${totalFiles}`);
 
-            {/* Pipeline Steps */}
-            <div className="glass-card p-6 space-y-4">
-              {Object.entries(STAGE_INFO).map(([key, info]) => {
-                if (key === 'error') return null;
-                const current = processingProgress?.stage;
-                const stages = Object.keys(STAGE_INFO).filter(k => k !== 'error');
-                const currentIdx = stages.indexOf(current || '');
-                const thisIdx = stages.indexOf(key);
+          const overallPct = Math.round((processingProgress?.progress || 0.15) * 100);
+          const estTotalSeconds = elapsedSeconds > 4 && overallPct > 5 
+            ? Math.round(elapsedSeconds / (overallPct / 100))
+            : Math.max(50, totalFiles * 22);
+          const estimatedRemainingSeconds = Math.max(5, estTotalSeconds - elapsedSeconds);
 
-                let status: 'pending' | 'active' | 'done' = 'pending';
-                if (thisIdx < currentIdx || current === 'completed') status = 'done';
-                else if (thisIdx === currentIdx) status = 'active';
+          return (
+            <div className="animate-fade-in max-w-2xl mx-auto py-12 space-y-6">
+              <div className="text-center space-y-2">
+                <h2 className="text-3xl font-bold font-display text-white">
+                  Analyzing Your Papers
+                </h2>
+                <p className="text-surface-400 text-sm">
+                  Processing {totalFiles} scientific paper{totalFiles > 1 ? 's' : ''} through the evidence-aware pipeline
+                </p>
+              </div>
 
-                return (
-                  <div key={key} className="flex items-center gap-4">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm shrink-0 transition-all duration-500 ${
-                      status === 'done' ? 'bg-emerald-500/20 text-emerald-400' :
-                      status === 'active' ? 'bg-brand-500/20 text-brand-400 animate-pulse' :
-                      'bg-surface-800 text-surface-500'
-                    }`}>
-                      {status === 'done' ? <CheckIcon /> : info.icon}
+              {/* ─── Live File Tracker & Timer Status Card ─── */}
+              <div className="glass-card p-4 grid grid-cols-1 sm:grid-cols-2 gap-4 border border-surface-700/60 bg-surface-900/70 backdrop-blur-xl shadow-xl">
+                {/* File-level Activity Counter */}
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 text-lg shrink-0 shadow-inner">
+                    📄
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-emerald-400 uppercase tracking-wider">
+                        File {currentFileIndex} of {totalFiles}
+                      </span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+                        {remainingFilesCount} remaining
+                      </span>
                     </div>
-                    <div className="flex-1">
-                      <p className={`text-sm font-medium transition-colors duration-300 ${
-                        status === 'done' ? 'text-surface-400' :
-                        status === 'active' ? 'text-white' :
-                        'text-surface-500'
-                      }`}>
-                        {info.label}
-                      </p>
-                      {status === 'active' && processingProgress?.message && (
-                        <p className="text-xs text-brand-400/70 mt-0.5 animate-fade-in">
-                          {processingProgress.message}
-                        </p>
-                      )}
+                    <p className="text-xs text-white truncate font-medium mt-0.5" title={currentFileName}>
+                      {currentFileName}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Live Elapsed & Estimated Timer */}
+                <div className="flex items-center gap-3 sm:border-l sm:border-surface-800/80 sm:pl-4">
+                  <div className="w-10 h-10 rounded-xl bg-purple-500/15 border border-purple-500/30 flex items-center justify-center text-purple-400 text-lg shrink-0 shadow-inner">
+                    ⏱️
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs text-surface-400 flex items-center gap-1.5">
+                      <span>Elapsed:</span>
+                      <strong className="text-surface-200 font-mono font-medium">{formatTime(elapsedSeconds)}</strong>
+                    </div>
+                    <div className="text-xs text-surface-300 mt-0.5 flex items-center gap-1.5">
+                      <span>Est. Remaining:</span>
+                      <strong className="text-emerald-400 font-mono font-semibold">
+                        ~{formatTime(estimatedRemainingSeconds)}
+                      </strong>
                     </div>
                   </div>
-                );
-              })}
-
-              {/* Overall progress bar */}
-              <div className="pt-4 mt-2 border-t border-surface-800/60 space-y-2">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-medium text-brand-300 flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-brand-400 animate-ping inline-block"></span>
-                    {processingProgress?.message || 'Analyzing papers through evidence pipeline...'}
-                  </span>
-                  <span className="font-mono text-brand-400 font-bold text-sm">
-                    {Math.round((processingProgress?.progress || 0.15) * 100)}%
-                  </span>
-                </div>
-                <div className="w-full bg-surface-800/90 h-3 rounded-full overflow-hidden border border-surface-700/50 p-0.5 shadow-inner">
-                  <div
-                    className="h-full bg-gradient-to-r from-brand-500 via-purple-500 to-indigo-500 transition-all duration-700 rounded-full shadow-lg shadow-brand-500/30"
-                    style={{ width: `${Math.max(8, Math.round((processingProgress?.progress || 0.15) * 100))}%` }}
-                  />
                 </div>
               </div>
 
+              {/* ─── Pipeline Steps with Green Specific Progress Bars ─── */}
+              <div className="glass-card p-6 space-y-4 border border-surface-800/80 shadow-2xl">
+                <div className="space-y-3">
+                  {Object.entries(STAGE_INFO).map(([key, info]) => {
+                    if (key === 'error') return null;
+                    const thisIdx = stages.indexOf(key);
+
+                    let status: 'pending' | 'active' | 'done' = 'pending';
+                    if (thisIdx < currentIdx || currentStageKey === 'completed') status = 'done';
+                    else if (thisIdx === currentIdx) status = 'active';
+
+                    // Compute specific step percentage
+                    const explicitPct = stepProgress[key] !== undefined ? Math.round(stepProgress[key] * 100) : null;
+                    const stepPercent = status === 'done' 
+                      ? 100 
+                      : status === 'active' 
+                        ? (explicitPct !== null ? Math.max(10, Math.min(99, explicitPct)) : Math.max(15, Math.min(95, Math.round(activeStepRatio * 100))))
+                        : 0;
+
+                    return (
+                      <div 
+                        key={key} 
+                        className={`p-3 rounded-xl transition-all duration-300 border ${
+                          status === 'active' 
+                            ? 'bg-surface-800/60 border-emerald-500/30 shadow-lg shadow-emerald-500/5' 
+                            : status === 'done'
+                              ? 'bg-surface-900/30 border-surface-800/40'
+                              : 'bg-transparent border-transparent opacity-60'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm shrink-0 transition-all duration-500 ${
+                              status === 'done' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40' :
+                              status === 'active' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50 shadow-[0_0_12px_rgba(16,185,129,0.3)] animate-pulse' :
+                              'bg-surface-800 text-surface-500 border border-surface-700/50'
+                            }`}>
+                              {status === 'done' ? <CheckIcon /> : info.icon}
+                            </div>
+                            <div className="min-w-0">
+                              <p className={`text-sm font-semibold transition-colors duration-300 truncate ${
+                                status === 'done' ? 'text-surface-300' :
+                                status === 'active' ? 'text-white' :
+                                'text-surface-500'
+                              }`}>
+                                {info.label}
+                              </p>
+                              {status === 'active' && (
+                                <p className="text-xs text-emerald-400/90 font-medium mt-0.5 truncate animate-fade-in">
+                                  {processingProgress?.message || `Processing ${currentFileName}...`}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Step Percentage Badge */}
+                          <div className="shrink-0 text-right">
+                            {status === 'done' && (
+                              <span className="text-[11px] font-mono font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                100% Done
+                              </span>
+                            )}
+                            {status === 'active' && (
+                              <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-[0_0_10px_rgba(16,185,129,0.25)] animate-pulse">
+                                {stepPercent}%
+                              </span>
+                            )}
+                            {status === 'pending' && (
+                              <span className="text-[11px] text-surface-600 font-medium">
+                                Waiting
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* ─── Specific Step Progress Bar (Vibrant Green) ─── */}
+                        {status === 'active' && (
+                          <div className="mt-2.5 pt-1 space-y-1 animate-fade-in">
+                            <div className="w-full bg-surface-950/80 h-2.5 rounded-full overflow-hidden border border-emerald-500/30 p-0.5 shadow-inner">
+                              <div
+                                className="h-full bg-gradient-to-r from-emerald-500 via-emerald-400 to-teal-300 rounded-full transition-all duration-500 shadow-[0_0_12px_rgba(16,185,129,0.5)]"
+                                style={{ width: `${stepPercent}%` }}
+                              />
+                            </div>
+                            <div className="flex justify-between items-center text-[10px] text-emerald-400/75 px-0.5">
+                              <span>Step Progress: {stepPercent}%</span>
+                              <span>{totalFiles - remainingFilesCount} of {totalFiles} papers processed</span>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Completed Step Indicator */}
+                        {status === 'done' && (
+                          <div className="mt-1.5 w-full bg-surface-950/40 h-1 rounded-full overflow-hidden">
+                            <div className="h-full bg-emerald-500/40 rounded-full w-full" />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* ─── Overall Pipeline Progress Bar ─── */}
+                <div className="pt-4 mt-2 border-t border-surface-800/80 space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-brand-300 flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-brand-400 animate-ping inline-block"></span>
+                      Overall Pipeline Progress
+                    </span>
+                    <span className="font-mono text-brand-400 font-bold text-sm">
+                      {overallPct}%
+                    </span>
+                  </div>
+                  <div className="w-full bg-surface-950/90 h-3 rounded-full overflow-hidden border border-surface-700/50 p-0.5 shadow-inner">
+                    <div
+                      className="h-full bg-gradient-to-r from-brand-500 via-purple-500 to-indigo-500 transition-all duration-700 rounded-full shadow-lg shadow-brand-500/30"
+                      style={{ width: `${Math.max(8, overallPct)}%` }}
+                    />
+                  </div>
+                </div>
+
+              </div>
+
+              {error && (
+                <div className="glass-card border-red-500/30 bg-red-500/5 p-4">
+                  <p className="text-red-400 text-sm">{error}</p>
+                </div>
+              )}
             </div>
-
-            {error && (
-              <div className="glass-card border-red-500/30 bg-red-500/5 p-4">
-                <p className="text-red-400 text-sm">{error}</p>
-              </div>
-            )}
-          </div>
-        )}
+          );
+        })()}
 
         {/* ─── Results Stage ─── */}
         {stage === 'results' && review && (

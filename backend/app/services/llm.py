@@ -159,6 +159,7 @@ class LLMClient:
                 messages=messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                timeout=45.0,
                 **extra_params,
             )
             return response.choices[0].message.content or ""

@@ -131,6 +131,7 @@ def process_session_pipeline(self, session_id: str):
             paper.page_count = extracted["page_count"]
             paper.processing_status = "extracted"
             db.commit()
+            update_job_status(db, session_id, "pdf_extraction", "running", progress=round((i + 1) / len(papers), 2))
 
         update_job_status(db, session_id, "pdf_extraction", "completed", 1.0)
 
@@ -160,6 +161,8 @@ def process_session_pipeline(self, session_id: str):
             paper.limitations = metadata.get("limitations")
             paper.processing_status = "metadata_extracted"
             db.commit()
+            update_job_status(db, session_id, "metadata_extraction", "running", progress=round((i + 1) / len(papers), 2))
+
 
         update_job_status(db, session_id, "metadata_extraction", "completed", 1.0)
 
@@ -167,13 +170,16 @@ def process_session_pipeline(self, session_id: str):
         current_step += 1
         publish_progress(session_id, "chunking", current_step / total_steps,
                         "Performing semantic chunking...")
-        update_job_status(db, session_id, "chunking", "running")
+        update_job_status(db, session_id, "chunking", "running", progress=0.1)
 
         from app.services.chunker import SemanticChunker
         chunker = SemanticChunker()
 
         all_chunks = []
-        for paper in papers:
+        for i, paper in enumerate(papers):
+            publish_progress(session_id, "chunking",
+                           (current_step - 1 + (i + 1) / len(papers)) / total_steps,
+                           f"Segmenting {paper.filename} ({i+1}/{len(papers)})")
             chunks = chunker.chunk_document(paper.full_text, str(paper.id))
             for idx, chunk_data in enumerate(chunks):
                 chunk = Chunk(
@@ -187,6 +193,7 @@ def process_session_pipeline(self, session_id: str):
                 db.add(chunk)
                 all_chunks.append(chunk)
             db.commit()
+            update_job_status(db, session_id, "chunking", "running", progress=round((i + 1) / len(papers), 2))
 
         update_job_status(db, session_id, "chunking", "completed", 1.0)
 
@@ -194,7 +201,7 @@ def process_session_pipeline(self, session_id: str):
         current_step += 1
         publish_progress(session_id, "embedding", current_step / total_steps,
                         "Generating vector embeddings...")
-        update_job_status(db, session_id, "embedding", "running")
+        update_job_status(db, session_id, "embedding", "running", progress=0.35)
 
         from app.services.retriever import HybridRetriever
         retriever = HybridRetriever()
@@ -211,13 +218,16 @@ def process_session_pipeline(self, session_id: str):
         current_step += 1
         publish_progress(session_id, "claim_extraction", current_step / total_steps,
                         "Extracting scientific claims...")
-        update_job_status(db, session_id, "claim_extraction", "running")
+        update_job_status(db, session_id, "claim_extraction", "running", progress=0.1)
 
         from app.services.claim_extractor import ClaimExtractor
         claim_extractor = ClaimExtractor()
 
         all_claims = []
-        for paper in papers:
+        for i, paper in enumerate(papers):
+            publish_progress(session_id, "claim_extraction",
+                           (current_step - 1 + (i + 1) / len(papers)) / total_steps,
+                           f"Extracting claims from {paper.filename} ({i+1}/{len(papers)})")
             claims = claim_extractor.extract_claims(paper)
             for claim_data in claims:
                 claim = Claim(
@@ -231,6 +241,7 @@ def process_session_pipeline(self, session_id: str):
                 db.add(claim)
                 all_claims.append(claim)
             db.commit()
+            update_job_status(db, session_id, "claim_extraction", "running", progress=round((i + 1) / len(papers), 2))
 
         update_job_status(db, session_id, "claim_extraction", "completed", 1.0)
 
@@ -238,7 +249,7 @@ def process_session_pipeline(self, session_id: str):
         current_step += 1
         publish_progress(session_id, "evidence_mapping", current_step / total_steps,
                         "Mapping claims to evidence across papers...")
-        update_job_status(db, session_id, "evidence_mapping", "running")
+        update_job_status(db, session_id, "evidence_mapping", "running", progress=0.4)
 
         from app.services.evidence_mapper import EvidenceMapper
         evidence_mapper = EvidenceMapper(retriever)
@@ -267,7 +278,7 @@ def process_session_pipeline(self, session_id: str):
         current_step += 1
         publish_progress(session_id, "review_generation", current_step / total_steps,
                         "Generating evidence-aware literature review...")
-        update_job_status(db, session_id, "review_generation", "running")
+        update_job_status(db, session_id, "review_generation", "running", progress=0.45)
 
         from app.services.review_generator import ReviewGenerator
         review_generator = ReviewGenerator(retriever)
@@ -292,7 +303,7 @@ def process_session_pipeline(self, session_id: str):
         current_step += 1
         publish_progress(session_id, "verification", current_step / total_steps,
                         "Verifying citations and checking for hallucinations...")
-        update_job_status(db, session_id, "verification", "running")
+        update_job_status(db, session_id, "verification", "running", progress=0.5)
 
         from app.services.verifier import CitationVerifier
         verifier = CitationVerifier(retriever)
