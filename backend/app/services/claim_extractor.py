@@ -49,7 +49,7 @@ class ClaimExtractor:
         if len(text_parts) < 2 and paper.full_text:
             text_parts.append(f"FULL TEXT (excerpt):\n{paper.full_text[:6000]}")
 
-        combined_text = "\n\n".join(text_parts)[:8000]
+        combined_text = "\n\n".join(text_parts)[:4500]
 
         prompt = f"""Analyze this scientific paper and extract ALL significant scientific claims.
 For each claim, classify it and provide context.
@@ -73,7 +73,7 @@ Claim types:
 - "gap": identified research gaps or open problems
 
 Rules:
-- Extract 5-20 claims per paper (focus on the most significant)
+- Extract 5-8 key claims per paper (focus on the most significant)
 - Include specific numerical results when available (e.g., "achieved 95.3% accuracy on CIFAR-10")
 - Preserve the factual precision of each claim
 - Set confidence between 0.0-1.0 based on how clearly the claim is stated
@@ -86,7 +86,7 @@ Paper: "{paper.title or paper.filename}"
         claims = self.llm.generate_json(
             prompt,
             temperature=0.1,
-            max_tokens=4000,
+            max_tokens=1200,
         )
         if not isinstance(claims, list):
             claims = [claims]

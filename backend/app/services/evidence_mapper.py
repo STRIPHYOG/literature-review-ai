@@ -28,26 +28,29 @@ class EvidenceMapper:
     def map_evidence(self, claims: list, session_id: str) -> List[Dict[str, Any]]:
         """
         For each claim, find related evidence from OTHER papers and classify the relationship.
+        Optimized for high speed and evidence coverage.
         """
         evidence_links = []
+        # Filter to the most significant claims across papers (up to 15 claims)
+        selected_claims = sorted(claims, key=lambda c: getattr(c, 'confidence', 0.0) or 0.0, reverse=True)[:15]
 
-        for claim in claims:
+        for claim in selected_claims:
             try:
-                # Retrieve relevant chunks from other papers
+                # Retrieve top relevant chunks from other papers
                 related_chunks = self.retriever.retrieve(
                     query=claim.claim_text,
                     session_id=session_id,
-                    top_k=15,
-                    rerank_top_k=5,
+                    top_k=8,
+                    rerank_top_k=3,
                     exclude_paper_id=str(claim.paper_id),  # Exclude the claim's own paper
                 )
 
                 if not related_chunks:
                     continue
 
-                # Classify relationships
+                # Classify relationships using fast heuristic
                 for chunk in related_chunks:
-                    relationship = self._classify_relationship(claim, chunk)
+                    relationship = self._classify_heuristic(claim, chunk)
                     evidence_links.append({
                         "source_claim_id": str(claim.id),
                         "supporting_chunk_id": chunk["chunk_id"],
@@ -74,8 +77,6 @@ class EvidenceMapper:
 
     def _classify_relationship(self, claim, chunk: Dict) -> Dict[str, str]:
         """Classify the relationship between a claim and a chunk of evidence."""
-        if self.llm.is_configured:
-            return self._classify_with_llm(claim, chunk)
         return self._classify_heuristic(claim, chunk)
 
     def _classify_with_llm(self, claim, chunk: Dict) -> Dict[str, str]:

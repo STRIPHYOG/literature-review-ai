@@ -139,17 +139,19 @@ def process_session_pipeline(self, session_id: str):
         current_step += 1
         publish_progress(session_id, "metadata_extraction", current_step / total_steps,
                         "Extracting scientific metadata...")
-        update_job_status(db, session_id, "metadata_extraction", "running")
+        update_job_status(db, session_id, "metadata_extraction", "running", progress=0.1)
 
         from app.services.metadata_extractor import MetadataExtractor
+        from concurrent.futures import ThreadPoolExecutor
         metadata_extractor = MetadataExtractor()
 
-        for i, paper in enumerate(papers):
-            publish_progress(session_id, "metadata_extraction",
-                           (current_step - 1 + (i + 1) / len(papers)) / total_steps,
-                           f"Analyzing metadata for {paper.filename} ({i+1}/{len(papers)})")
+        def _extract_paper_meta(p):
+            return p, metadata_extractor.extract(p.full_text, p.filename)
 
-            metadata = metadata_extractor.extract(paper.full_text, paper.filename)
+        with ThreadPoolExecutor(max_workers=min(4, len(papers))) as executor:
+            meta_results = list(executor.map(_extract_paper_meta, papers))
+
+        for i, (paper, metadata) in enumerate(meta_results):
             paper.title = metadata.get("title", paper.filename)
             paper.authors = metadata.get("authors", [])
             paper.publication_year = metadata.get("publication_year")
@@ -162,7 +164,6 @@ def process_session_pipeline(self, session_id: str):
             paper.processing_status = "metadata_extracted"
             db.commit()
             update_job_status(db, session_id, "metadata_extraction", "running", progress=round((i + 1) / len(papers), 2))
-
 
         update_job_status(db, session_id, "metadata_extraction", "completed", 1.0)
 
@@ -223,12 +224,14 @@ def process_session_pipeline(self, session_id: str):
         from app.services.claim_extractor import ClaimExtractor
         claim_extractor = ClaimExtractor()
 
+        def _extract_single_claims(p):
+            return p, claim_extractor.extract_claims(p)
+
+        with ThreadPoolExecutor(max_workers=min(4, len(papers))) as executor:
+            claims_results = list(executor.map(_extract_single_claims, papers))
+
         all_claims = []
-        for i, paper in enumerate(papers):
-            publish_progress(session_id, "claim_extraction",
-                           (current_step - 1 + (i + 1) / len(papers)) / total_steps,
-                           f"Extracting claims from {paper.filename} ({i+1}/{len(papers)})")
-            claims = claim_extractor.extract_claims(paper)
+        for i, (paper, claims) in enumerate(claims_results):
             for claim_data in claims:
                 claim = Claim(
                     paper_id=paper.id,

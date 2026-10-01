@@ -35,8 +35,8 @@ class MetadataExtractor:
 
     def _extract_with_llm(self, full_text: str, filename: str) -> Dict[str, Any]:
         """Use LLM to extract structured metadata."""
-        # Truncate text to fit context window (use first ~8000 chars for metadata)
-        text_sample = full_text[:8000]
+        # Truncate text to fit context window (use first ~4000 chars for metadata)
+        text_sample = full_text[:4000]
 
         prompt = f"""Analyze this scientific paper and extract the following metadata.
 Return ONLY a valid JSON object with these exact fields:
@@ -69,7 +69,7 @@ Paper text (filename: {filename}):
         metadata = self.llm.generate_json(
             prompt,
             temperature=0.1,
-            max_tokens=2000,
+            max_tokens=800,
         )
 
         # Validate and clean

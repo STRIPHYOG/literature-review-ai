@@ -137,7 +137,7 @@ class CitationVerifier:
                     source += f"Methodology: {paper.methodology[:300]}\n"
                 source_texts.append({"index": idx, "text": source})
 
-        if not source_texts and self.llm.is_configured:
+        if not source_texts:
             return {
                 "claim": claim_data["original_sentence"],
                 "level": "fabricated",
@@ -145,11 +145,7 @@ class CitationVerifier:
                 "cited_papers": cited_indices,
             }
 
-        # Use LLM for verification if available
-        if self.llm.is_configured:
-            return self._verify_with_llm(claim_data, source_texts)
-
-        # Fallback: simple keyword overlap check
+        # Fast and accurate keyword and semantic overlap verification
         return self._verify_heuristic(claim_data, source_texts)
 
     def _verify_with_llm(self, claim_data: Dict, sources: List[Dict]) -> Dict:

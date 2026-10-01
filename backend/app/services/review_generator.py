@@ -244,7 +244,7 @@ The review should be 2000-4000 words long.
         review_text = self.llm.generate(
             prompt=prompt,
             temperature=0.3,
-            max_tokens=8000,
+            max_tokens=3500,
         )
 
         # Post-process: ensure proper citation formatting
@@ -274,14 +274,14 @@ Return a JSON array of research gaps:
     }}
 ]
 
-Identify 3-7 specific, well-justified gaps. Do NOT fabricate gaps - base them on the actual limitations and missing aspects across these papers.
+Identify 3-5 specific, well-justified gaps. Do NOT fabricate gaps - base them on the actual limitations and missing aspects across these papers.
 """
 
         try:
             gaps = self.llm.generate_json(
                 prompt=prompt,
                 temperature=0.2,
-                max_tokens=2000,
+                max_tokens=1000,
             )
             return gaps if isinstance(gaps, list) else []
 

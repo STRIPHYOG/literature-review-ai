@@ -116,24 +116,24 @@ class HybridRetriever:
             )
 
 
-        # Generate embeddings in batches if model is loaded
+        # Generate embeddings quickly on key chunks (up to 30) so Render CPU never throttles
         texts = [c.content for c in chunks]
         all_embeddings = []
-        if self.embedding_model:
+        max_dense_count = min(30, len(texts))
+
+        if self.embedding_model and max_dense_count > 0:
             try:
-                batch_size = 32
-                for i in range(0, len(texts), batch_size):
-                    batch = texts[i:i + batch_size]
-                    embeddings = self.embedding_model.encode(batch, show_progress_bar=False)
-                    all_embeddings.extend(embeddings)
+                sample_texts = texts[:max_dense_count]
+                embeddings = self.embedding_model.encode(sample_texts, batch_size=16, show_progress_bar=False)
+                all_embeddings = list(embeddings)
             except Exception as e:
                 logger.warning("Dense embedding generation skipped, using BM25", error=str(e))
                 all_embeddings = []
 
         # Store in Qdrant if embeddings were computed
-        if all_embeddings and len(all_embeddings) == len(chunks):
+        if all_embeddings:
             points = []
-            for idx, (chunk, embedding) in enumerate(zip(chunks, all_embeddings)):
+            for idx, (chunk, embedding) in enumerate(zip(chunks[:len(all_embeddings)], all_embeddings)):
                 points.append(PointStruct(
                     id=idx,
                     vector=embedding.tolist(),
@@ -147,25 +147,13 @@ class HybridRetriever:
                     },
                 ))
 
-            # Upload in batches
             try:
-                for i in range(0, len(points), 100):
-                    self.qdrant.upsert(
-                        collection_name=collection_name,
-                        points=points[i:i + 100],
-                    )
-            except Exception as e:
-                logger.warning("Qdrant upsert failed, retrying in-memory", error=str(e))
-                self.qdrant = QdrantClient(location=":memory:")
-                self.qdrant.create_collection(
+                self.qdrant.upsert(
                     collection_name=collection_name,
-                    vectors_config=VectorParams(size=self.embedding_dim, distance=Distance.COSINE),
+                    points=points,
                 )
-                for i in range(0, len(points), 100):
-                    self.qdrant.upsert(
-                        collection_name=collection_name,
-                        points=points[i:i + 100],
-                    )
+            except Exception as e:
+                logger.warning("Qdrant upsert failed, continuing with BM25", error=str(e))
 
 
 
