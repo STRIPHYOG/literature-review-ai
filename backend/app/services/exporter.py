@@ -81,12 +81,14 @@ class ReviewExporter:
             # Data rows
             for paper in comparison_table:
                 row = table.add_row()
+                auth_list = [str(a) for a in paper.get("authors", []) if a is not None] if isinstance(paper.get("authors"), list) else [str(paper.get("authors", ""))]
+                data_list = [str(d) for d in paper.get("datasets", []) if d is not None] if isinstance(paper.get("datasets"), list) else [str(paper.get("datasets", ""))]
                 values = [
                     str(paper.get("title", ""))[:50],
-                    ", ".join(paper.get("authors", []))[:40] if isinstance(paper.get("authors"), list) else str(paper.get("authors", ""))[:40],
+                    ", ".join(auth_list)[:40],
                     str(paper.get("publication_year", "N/A")),
                     str(paper.get("methodology", ""))[:100],
-                    ", ".join(paper.get("datasets", [])) if isinstance(paper.get("datasets"), list) else str(paper.get("datasets", "")),
+                    ", ".join(data_list),
                     str(paper.get("key_results", ""))[:100],
                     str(paper.get("limitations", ""))[:100],
                 ]
@@ -218,9 +220,10 @@ class ReviewExporter:
         html += "</tr></thead>\n<tbody>\n"
 
         for paper in comparison_table:
-            html += "<tr>"
-            authors = ", ".join(paper.get("authors", [])) if isinstance(paper.get("authors"), list) else str(paper.get("authors", ""))
-            datasets = ", ".join(paper.get("datasets", [])) if isinstance(paper.get("datasets"), list) else str(paper.get("datasets", ""))
+            auth_list = [str(a) for a in paper.get("authors", []) if a is not None] if isinstance(paper.get("authors"), list) else [str(paper.get("authors", ""))]
+            data_list = [str(d) for d in paper.get("datasets", []) if d is not None] if isinstance(paper.get("datasets"), list) else [str(paper.get("datasets", ""))]
+            authors = ", ".join(auth_list)
+            datasets = ", ".join(data_list)
             values = [
                 str(paper.get("title", ""))[:60],
                 authors[:50],

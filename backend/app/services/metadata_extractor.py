@@ -141,8 +141,8 @@ Paper text (filename: {filename}):
         if not metadata.get("title"):
             metadata["title"] = filename.replace(".pdf", "").replace("_", " ")
 
-        if not isinstance(metadata.get("authors"), list):
-            metadata["authors"] = []
+        raw_authors = metadata.get("authors") if isinstance(metadata.get("authors"), list) else []
+        metadata["authors"] = [str(a).strip() for a in raw_authors if a is not None and str(a).strip() and str(a).strip().lower() != "none"]
 
         if metadata.get("publication_year"):
             try:
@@ -154,11 +154,11 @@ Paper text (filename: {filename}):
             except (ValueError, TypeError):
                 metadata["publication_year"] = None
 
-        if not isinstance(metadata.get("datasets"), list):
-            metadata["datasets"] = []
+        raw_datasets = metadata.get("datasets") if isinstance(metadata.get("datasets"), list) else []
+        metadata["datasets"] = [str(d).strip() for d in raw_datasets if d is not None and str(d).strip() and str(d).strip().lower() != "none"]
 
-        if not isinstance(metadata.get("evaluation_metrics"), list):
-            metadata["evaluation_metrics"] = []
+        raw_metrics = metadata.get("evaluation_metrics") if isinstance(metadata.get("evaluation_metrics"), list) else []
+        metadata["evaluation_metrics"] = [str(m).strip() for m in raw_metrics if m is not None and str(m).strip() and str(m).strip().lower() != "none"]
 
         # Truncate long fields
         for field in ["abstract", "methodology", "key_results", "limitations"]:

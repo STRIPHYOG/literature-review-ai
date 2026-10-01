@@ -19,6 +19,19 @@ logger = structlog.get_logger(__name__)
 settings = get_settings()
 
 
+def safe_join(items: Any, default: str = "Not specified", sep: str = ", ") -> str:
+    """Safely join a collection of items, ignoring None, empty, or string 'None' elements."""
+    if not items:
+        return default
+    if not isinstance(items, (list, tuple, set)):
+        items = [items]
+    valid = [
+        str(x).strip() for x in items
+        if x is not None and str(x).strip() and str(x).strip().lower() != "none"
+    ]
+    return sep.join(valid) if valid else default
+
+
 class ReviewGenerator:
     """
     Generates evidence-grounded literature reviews using RAG.
@@ -77,12 +90,12 @@ class ReviewGenerator:
                 "index": i + 1,
                 "id": str(paper.id),
                 "title": paper.title or paper.filename,
-                "authors": ", ".join(paper.authors) if paper.authors else "Unknown",
+                "authors": safe_join(paper.authors, default="Unknown Author"),
                 "year": paper.publication_year or "N/A",
                 "abstract": paper.abstract or "",
                 "methodology": paper.methodology or "",
-                "datasets": ", ".join(paper.datasets) if paper.datasets else "Not specified",
-                "metrics": ", ".join(paper.evaluation_metrics) if paper.evaluation_metrics else "Not specified",
+                "datasets": safe_join(paper.datasets, default="Not specified"),
+                "metrics": safe_join(paper.evaluation_metrics, default="Not specified"),
                 "results": paper.key_results or "",
                 "limitations": paper.limitations or "",
             }
@@ -142,14 +155,17 @@ class ReviewGenerator:
         """Build the paper comparison table data."""
         table = []
         for paper in papers:
+            authors = [str(a).strip() for a in (paper.authors or []) if a is not None and str(a).strip() and str(a).strip().lower() != "none"]
+            datasets = [str(d).strip() for d in (paper.datasets or []) if d is not None and str(d).strip() and str(d).strip().lower() != "none"]
+            metrics = [str(m).strip() for m in (paper.evaluation_metrics or []) if m is not None and str(m).strip() and str(m).strip().lower() != "none"]
             table.append({
                 "paper_id": str(paper.id),
                 "title": paper.title or paper.filename,
-                "authors": paper.authors or [],
+                "authors": authors,
                 "publication_year": paper.publication_year,
                 "methodology": paper.methodology or "Not specified",
-                "datasets": paper.datasets or [],
-                "evaluation_metrics": paper.evaluation_metrics or [],
+                "datasets": datasets,
+                "evaluation_metrics": metrics,
                 "key_results": paper.key_results or "Not specified",
                 "limitations": paper.limitations or "Not specified",
             })
@@ -300,7 +316,7 @@ Identify 3-5 specific, well-justified gaps. Do NOT fabricate gaps - base them on
         """Build a structured citation index linking paper references to metadata."""
         citations = []
         for i, paper in enumerate(papers):
-            authors_str = ", ".join(paper.authors) if paper.authors else "Unknown"
+            authors_str = safe_join(paper.authors, default="Unknown Author")
             citations.append({
                 "index": i + 1,
                 "paper_id": str(paper.id),
@@ -328,7 +344,7 @@ Identify 3-5 specific, well-justified gaps. Do NOT fabricate gaps - base them on
     ) -> str:
         """Synthesize a complete academic literature review when external LLM times out or is unreachable."""
         total = len(paper_contexts)
-        titles = ", ".join([f'"{p["title"]}"' for p in paper_contexts[:3]])
+        titles = safe_join([f'"{p.get("title") or "Paper"}"' for p in paper_contexts[:3]], default="Selected Papers")
         if total > 3:
             titles += f" and {total - 3} other works"
 

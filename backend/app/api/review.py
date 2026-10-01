@@ -116,15 +116,18 @@ async def get_comparison_table(session_id: UUID, db: AsyncSession = Depends(get_
 
     rows = []
     for p in papers:
+        authors = [str(a).strip() for a in (p.authors or []) if a is not None and str(a).strip()]
+        datasets = [str(d).strip() for d in (p.datasets or []) if d is not None and str(d).strip()]
+        metrics = [str(m).strip() for m in (p.evaluation_metrics or []) if m is not None and str(m).strip()]
         rows.append(ComparisonRow(
             paper_id=p.id,
             title=p.title or p.filename,
-            authors=p.authors or [],
+            authors=authors,
             publication_year=p.publication_year,
             research_objective=p.abstract[:200] + "..." if p.abstract and len(p.abstract) > 200 else p.abstract,
             methodology=p.methodology,
-            dataset=", ".join(p.datasets) if p.datasets else None,
-            evaluation_metrics=p.evaluation_metrics,
+            dataset=", ".join(datasets) if datasets else None,
+            evaluation_metrics=metrics,
             key_results=p.key_results,
             limitations=p.limitations,
             supporting_evidence=None,
