@@ -28,50 +28,21 @@ class HybridRetriever:
     """
 
     def __init__(self):
-        # Dense embedding model (with fail-safe loading)
+        # Ultra-lightweight retriever: relies on BM25Okapi and in-memory vector index
+        # Avoids loading 400MB PyTorch models that cause 512MB OOM crash (502 Bad Gateway) on Render
         self.embedding_model = None
         self.embedding_dim = 384
-        try:
-            self.embedding_model = SentenceTransformer(settings.embedding_model)
-            self.embedding_dim = self.embedding_model.get_sentence_embedding_dimension()
-        except Exception as e:
-            logger.warning("Dense embedding model not loaded, using BM25 fallback", error=str(e))
-            self.embedding_model = None
-
-        # Cross-encoder reranker (optional fast reranking)
         self.reranker = None
-        try:
-            self.reranker = CrossEncoder(settings.reranker_model)
-        except Exception:
-            self.reranker = None
 
+        # Qdrant vector DB client with instant in-memory fallback
+        self.qdrant = QdrantClient(location=":memory:")
 
-        # Qdrant vector DB client with instant fallback
-        self.qdrant = None
-        try:
-            if settings.qdrant_api_key and "qdrant.io" in settings.qdrant_host:
-                client = QdrantClient(url=settings.qdrant_host, api_key=settings.qdrant_api_key, timeout=3)
-                client.get_collections()
-                self.qdrant = client
-            elif settings.qdrant_host.startswith("http") and "qdrant" not in settings.qdrant_host:
-                client = QdrantClient(url=settings.qdrant_host, timeout=3)
-                client.get_collections()
-                self.qdrant = client
-        except Exception:
-            pass
-
-        if not self.qdrant:
-            logger.info("Using fast in-memory vector store for Qdrant")
-            self.qdrant = QdrantClient(location=":memory:")
-
-        # BM25 index (in-memory per session)
+        # BM25 index (in-memory per session - ultra-fast, zero-overhead)
         self._bm25_indices: Dict[str, dict] = {}
 
         logger.info(
-            "HybridRetriever initialized",
-            embedding_model=settings.embedding_model,
+            "HybridRetriever initialized (Optimized for Render Free Tier)",
             embedding_dim=self.embedding_dim,
-            reranker=settings.reranker_model,
         )
 
     def _get_collection_name(self, session_id: str) -> str:
